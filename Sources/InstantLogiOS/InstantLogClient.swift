@@ -267,10 +267,12 @@ actor InstantLogClient {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
-        guard let body = try? encoder.encode(entry) else {
-            throw InstantLogError.encodingFailed(URLError(.cannotDecodeContentData))
+        do {
+            request.httpBody = try encoder.encode(entry)
+        } catch {
+            // Preserve the real encoding error so callers can surface it via InstantLogError.encodingFailed.
+            throw InstantLogError.encodingFailed(error)
         }
-        request.httpBody = body
         return request
     }
 }

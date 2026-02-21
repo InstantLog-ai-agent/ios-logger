@@ -154,6 +154,9 @@ public final class InstantLog: @unchecked Sendable {
         userId: String?,
         metadata: [String: Any]?
     ) -> (entry: InstantLogEntry, client: InstantLogClient)? {
+        // Read client and config atomically. Without the lock, a concurrent configure()
+        // call on another thread could leave us with a mismatched pair (old client, new config).
+        let (client, config) = lock.withLock { (self.client, self.config) }
         guard let client, let config else { return nil }
         let resolvedUserId = userId ?? config.defaultUserId
         let truncated = content.count > 200 ? String(content.prefix(197)) + "..." : content
@@ -173,7 +176,9 @@ public final class InstantLog: @unchecked Sendable {
         metadata: [String: Any]?
     ) {
         guard let (entry, client) = prepareEntry(content, level: level, userId: userId, metadata: metadata) else {
+            #if DEBUG
             debugPrint("[InstantLog] Not configured. Call InstantLog.configure(...) at app startup.")
+            #endif
             return
         }
         // enqueue() is nonisolated and synchronous — no Task created per call.
