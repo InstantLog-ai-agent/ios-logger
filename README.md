@@ -7,7 +7,7 @@ Swift Package for sending logs to your [InstantLog](https://github.com/udevwork/
 **Swift Package Manager** — add to your `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/YOUR_ORG/InstantLogiOS", from: "1.0.0")
+.package(url: "https://github.com/InstantLog-ai-agent/ios-logger", from: "1.0.1")
 ```
 
 Or in Xcode: **File → Add Package Dependencies…** → paste the repo URL.
@@ -81,7 +81,30 @@ InstantLog.log("Purchase completed", metadata: [
 ])
 ```
 
+## Error Handling
+
+When using `logAsync`, you can catch typed `InstantLogError` cases:
+
+```swift
+do {
+    try await InstantLog.logAsync("Event", level: .info)
+} catch let error as InstantLogError {
+    switch error {
+    case .notConfigured:            // forgot to call configure()
+    case .networkError(let e):      // no internet / timeout
+    case .serverError(let code):    // server returned 4xx / 5xx
+    case .encodingFailed(let e):    // metadata serialisation failed
+    case .rateLimited:              // server returned 429 — logging is now suspended
+    }
+}
+```
+
+### Rate Limiting
+
+If the server returns **HTTP 429**, the SDK permanently suspends all logging for the current app session (circuit-breaker pattern). No further network requests are made until the app is relaunched. This prevents a log loop from hammering the server.
+
 ## Requirements
 
 - iOS 16+ / macOS 13+
-- Swift 5.9+
+- Swift 5.5+
+- Xcode 13+
