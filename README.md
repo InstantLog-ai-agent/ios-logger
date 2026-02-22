@@ -7,7 +7,7 @@ Swift Package for sending logs to your [InstantLog](https://github.com/udevwork/
 **Swift Package Manager** — add to your `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/InstantLog-ai-agent/ios-logger", from: "1.0.1")
+.package(url: "https://github.com/InstantLog-ai-agent/ios-logger", from: "1.0.2")
 ```
 
 Or in Xcode: **File → Add Package Dependencies…** → paste the repo URL.
