@@ -1,2 +1,2 @@
-// Public re-export of the InstantLog SDK surface.
-@_exported import struct Foundation.URL
+// InstantLogiOS — entry point marker.
+// All public SDK types are defined in their own files (InstantLog.swift, InstantLogConfig.swift, etc.)

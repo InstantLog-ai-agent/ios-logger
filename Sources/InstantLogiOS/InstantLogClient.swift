@@ -262,7 +262,7 @@ actor InstantLogClient {
     /// - Returns: A ready-to-send `URLRequest`.
     /// - Throws: ``InstantLogError/encodingFailed(_:)`` if JSON encoding fails.
     private func buildRequest(entry: InstantLogEntry) throws -> URLRequest {
-        let url = host.appendingPathComponent("/api/logs")
+        let url = host.appendingPathComponent("api/logs")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")

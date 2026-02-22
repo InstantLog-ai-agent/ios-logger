@@ -128,12 +128,10 @@ public final class InstantLog: @unchecked Sendable {
         #if DEBUG
         if cfg.enabled {
             print("""
-            ┌─────────────────────────────────────────┐
-            │  InstantLog ✅ configured                │
-            │  Host:    \(cfg.host.absoluteString)
-            │  User:    \(cfg.defaultUserId ?? "(none)")
-            │  Timeout: \(Int(cfg.timeout))s
-            └─────────────────────────────────────────┘
+            [InstantLog] ✅ configured
+              Host:    \(cfg.host.absoluteString)
+              User:    \(cfg.defaultUserId ?? "(none)")
+              Timeout: \(Int(cfg.timeout))s
             """)
         } else {
             print("[InstantLog] ⚠️  SDK is disabled (enabled: false). No logs will be sent.")
