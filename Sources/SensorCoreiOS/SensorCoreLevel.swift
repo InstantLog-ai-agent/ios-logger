@@ -1,14 +1,14 @@
-/// Severity level of a log entry sent to the InstantLog server.
+/// Severity level of a log entry sent to the SensorCore server.
 ///
 /// Matches the server-side `level` field values exactly.
 /// The level is used in the dashboard for filtering, colouring, and analytics.
 ///
 /// ## Usage
 /// ```swift
-/// InstantLog.log("Device storage low", level: .warning)
-/// InstantLog.log("Payment declined",   level: .error)
+/// SensorCore.log("Device storage low", level: .warning)
+/// SensorCore.log("Payment declined",   level: .error)
 /// ```
-public enum InstantLogLevel: String, Sendable {
+public enum SensorCoreLevel: String, Sendable {
 
     /// General informational event. Default level. Use for normal app milestones,
     /// e.g. "User signed up", "Screen appeared".

@@ -1,17 +1,17 @@
 import Foundation
 
-// MARK: - InstantLogError
+// MARK: - SensorCoreError
 
-/// Errors thrown by ``InstantLog/logAsync(_:level:userId:metadata:)``.
+/// Errors thrown by ``SensorCore/logAsync(_:level:userId:metadata:)``.
 ///
-/// For fire-and-forget calls via ``InstantLog/log(_:level:userId:metadata:)``
+/// For fire-and-forget calls via ``SensorCore/log(_:level:userId:metadata:)``
 /// these errors are swallowed internally and printed to the console in `DEBUG` builds only.
 ///
 /// ### Handling errors
 /// ```swift
 /// do {
-///     try await InstantLog.logAsync("Purchase failed", level: .error)
-/// } catch let error as InstantLogError {
+///     try await SensorCore.logAsync("Purchase failed", level: .error)
+/// } catch let error as SensorCoreError {
 ///     switch error {
 ///     case .rateLimited:            // server banned this client — stop retrying
 ///     case .serverError(let code):  // e.g. 401 invalid API key, 500 server crash
@@ -21,15 +21,15 @@ import Foundation
 ///     }
 /// }
 /// ```
-public enum InstantLogError: Error, LocalizedError {
+public enum SensorCoreError: Error, LocalizedError {
 
-    /// ``InstantLog/logAsync(_:level:userId:metadata:)`` was called before
-    /// ``InstantLog/configure(apiKey:host:defaultUserId:enabled:timeout:)``.
+    /// ``SensorCore/logAsync(_:level:userId:metadata:)`` was called before
+    /// ``SensorCore/configure(apiKey:host:defaultUserId:enabled:timeout:)``.
     case notConfigured
 
-    /// The ``InstantLogEntry`` could not be serialised to JSON.
+    /// The ``SensorCoreEntry`` could not be serialised to JSON.
     /// This usually means a metadata value contained an unsupported type
-    /// that slipped past ``InstantLogMetadataValue/init?(value:)``.
+    /// that slipped past ``SensorCoreMetadataValue/init?(value:)``.
     case encodingFailed(Error)
 
     /// The server responded with a non-2xx HTTP status code other than 429.
@@ -54,16 +54,16 @@ public enum InstantLogError: Error, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .notConfigured:          return "InstantLog is not configured. Call InstantLog.configure(...) at app startup."
+        case .notConfigured:          return "SensorCore is not configured. Call SensorCore.configure(...) at app startup."
         case .encodingFailed(let e):  return "Failed to encode log entry: \(e.localizedDescription)"
         case .serverError(let code):  return "Server returned HTTP \(code)"
         case .networkError(let e):    return "Network error: \(e.localizedDescription)"
-        case .rateLimited:            return "InstantLog rate-limited (HTTP 429). Logging suspended for this session."
+        case .rateLimited:            return "SensorCore rate-limited (HTTP 429). Logging suspended for this session."
         }
     }
 }
 
-// MARK: - InstantLogClient
+// MARK: - SensorCoreClient
 
 /// Internal actor that owns the log queue and all network I/O.
 ///
@@ -76,7 +76,7 @@ public enum InstantLogError: Error, LocalizedError {
 /// enqueue()      sendThrowing()   ← bypasses queue, async/throws
 ///    │
 ///    ▼
-/// AsyncStream<InstantLogEntry>     ← bounded FIFO queue (max 1 000 entries)
+/// AsyncStream<SensorCoreEntry>     ← bounded FIFO queue (max 1 000 entries)
 ///    │
 ///    ▼
 /// single consumer Task             ← one Task for the lifetime of the client
@@ -92,7 +92,7 @@ public enum InstantLogError: Error, LocalizedError {
 /// - `enqueue()` and `_isSilenced` are `nonisolated` for synchronous call-site use.
 /// - The consumer Task captures only `Sendable` values — no reference to `self` is retained
 ///   (except weakly) so the actor can be released when the SDK is re-configured.
-actor InstantLogClient {
+actor SensorCoreClient {
 
     // MARK: - Constants
 
@@ -105,7 +105,7 @@ actor InstantLogClient {
     /// `URLSession` configured with the project's timeout value.
     private let session: URLSession
 
-    /// Reusable encoder for serialising ``InstantLogEntry`` values to JSON.
+    /// Reusable encoder for serialising ``SensorCoreEntry`` values to JSON.
     private let encoder: JSONEncoder
 
     /// API key sent in the `x-api-key` request header.
@@ -116,7 +116,7 @@ actor InstantLogClient {
 
     /// The write end of the internal ``AsyncStream``.
     /// Calling `.finish()` on it signals the consumer Task to exit gracefully.
-    private let continuation: AsyncStream<InstantLogEntry>.Continuation
+    private let continuation: AsyncStream<SensorCoreEntry>.Continuation
 
     /// Circuit-breaker flag.
     ///
@@ -132,7 +132,7 @@ actor InstantLogClient {
     /// Creates a new client and immediately starts the background consumer Task.
     ///
     /// - Parameter config: The SDK configuration containing API key, host, and timeout.
-    init(config: InstantLogConfig) {
+    init(config: SensorCoreConfig) {
         let sessionCfg = URLSessionConfiguration.default
         sessionCfg.timeoutIntervalForRequest = config.timeout
         let session = URLSession(configuration: sessionCfg)
@@ -145,9 +145,9 @@ actor InstantLogClient {
 
         // Build the bounded FIFO stream. The continuation's `yield` is Sendable,
         // so it can be called from any thread / actor.
-        var cont: AsyncStream<InstantLogEntry>.Continuation!
-        let stream = AsyncStream<InstantLogEntry>(
-            bufferingPolicy: .bufferingOldest(InstantLogClient.queueCapacity)
+        var cont: AsyncStream<SensorCoreEntry>.Continuation!
+        let stream = AsyncStream<SensorCoreEntry>(
+            bufferingPolicy: .bufferingOldest(SensorCoreClient.queueCapacity)
         ) { cont = $0 }
         self.continuation = cont
 
@@ -170,55 +170,94 @@ actor InstantLogClient {
     /// This method returns immediately without ever suspending — it is safe to
     /// call from `@MainActor` or any synchronous context with no performance impact.
     ///
-    /// If the circuit-breaker has been triggered (``InstantLogError/rateLimited``),
+    /// If the circuit-breaker has been triggered (``SensorCoreError/rateLimited``),
     /// the entry is silently dropped before it even reaches the stream.
     ///
     /// - Parameter entry: The pre-built log entry to enqueue.
-    nonisolated func enqueue(_ entry: InstantLogEntry) {
+    nonisolated func enqueue(_ entry: SensorCoreEntry) {
         guard !_isSilenced else { return }   // fast-path: no actor hop, no await
         continuation.yield(entry)
     }
 
     /// Sends a log entry **directly**, bypassing the queue.
     ///
-    /// Used exclusively by ``InstantLog/logAsync(_:level:userId:metadata:)`` when
+    /// Used exclusively by ``SensorCore/logAsync(_:level:userId:metadata:)`` when
     /// the caller needs to confirm that the server received the log.
     ///
     /// - Parameter entry: The log entry to transmit.
-    /// - Throws: ``InstantLogError/rateLimited`` if already silenced;
-    ///   ``InstantLogError/networkError(_:)`` on transport failure;
-    ///   ``InstantLogError/serverError(statusCode:)`` on non-2xx response.
-    func sendThrowing(entry: InstantLogEntry) async throws {
-        guard !_isSilenced else { throw InstantLogError.rateLimited }
+    /// - Throws: ``SensorCoreError/rateLimited`` if already silenced;
+    ///   ``SensorCoreError/networkError(_:)`` on transport failure;
+    ///   ``SensorCoreError/serverError(statusCode:)`` on non-2xx response.
+    func sendThrowing(entry: SensorCoreEntry) async throws {
+        guard !_isSilenced else { throw SensorCoreError.rateLimited }
         let request = try buildRequest(entry: entry)
         let response: URLResponse
         do {
             (_, response) = try await session.data(for: request)
         } catch {
-            throw InstantLogError.networkError(error)
+            throw SensorCoreError.networkError(error)
         }
         if let http = response as? HTTPURLResponse {
             if http.statusCode == 429 {
                 silence()
-                throw InstantLogError.rateLimited
+                throw SensorCoreError.rateLimited
             }
             if !(200...299).contains(http.statusCode) {
-                throw InstantLogError.serverError(statusCode: http.statusCode)
+                throw SensorCoreError.serverError(statusCode: http.statusCode)
             }
         }
     }
 
     // MARK: - Private
 
+    /// Fetches the current Remote Config from the server.
+    ///
+    /// Safe by design:
+    /// - Returns ``SensorCoreRemoteConfig/empty`` on any network / server / decoding error.
+    /// - Never throws. Never crashes.
+    /// - Does **not** interact with the circuit-breaker (uses a separate one-shot request).
+    ///
+    /// - Returns: The decoded config flags, or an empty config on any failure.
+    func fetchRemoteConfig() async -> SensorCoreRemoteConfig {
+        let url = host.appendingPathComponent("api/config")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse,
+                  (200...299).contains(http.statusCode) else {
+                #if DEBUG
+                let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+                print("[SensorCore] ⚠️ Remote Config fetch failed — HTTP \(code). Returning empty config.")
+                #endif
+                return .empty
+            }
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                #if DEBUG
+                print("[SensorCore] ⚠️ Remote Config response could not be decoded. Returning empty config.")
+                #endif
+                return .empty
+            }
+            return SensorCoreRemoteConfig(raw: json)
+        } catch {
+            #if DEBUG
+            print("[SensorCore] ⚠️ Remote Config network error: \(error.localizedDescription). Returning empty config.")
+            #endif
+            return .empty
+        }
+    }
+
     /// Sends one entry from the queue. Called by the consumer Task in a serial loop.
     ///
     /// - Parameter entry: The next entry dequeued from the `AsyncStream`.
     /// - Returns: `true` if a 429 was received and the consumer should stop; `false` otherwise.
-    private func transmit(entry: InstantLogEntry) async -> Bool {
+    private func transmit(entry: SensorCoreEntry) async -> Bool {
         guard !_isSilenced else { return true }
         guard let request = try? buildRequest(entry: entry) else {
             #if DEBUG
-            print("[InstantLog] 🔇 Failed to encode log entry — skipping.")
+            print("[SensorCore] 🔇 Failed to encode log entry — skipping.")
             #endif
             return false
         }
@@ -231,13 +270,13 @@ actor InstantLogClient {
                 }
                 if !(200...299).contains(http.statusCode) {
                     #if DEBUG
-                    print("[InstantLog] ❌ Server error \(http.statusCode) — log dropped.")
+                    print("[SensorCore] ❌ Server error \(http.statusCode) — log dropped.")
                     #endif
                 }
             }
         } catch {
             #if DEBUG
-            print("[InstantLog] ❌ Network error: \(error.localizedDescription)")
+            print("[SensorCore] ❌ Network error: \(error.localizedDescription)")
             #endif
         }
         return false
@@ -252,7 +291,7 @@ actor InstantLogClient {
         _isSilenced = true
         continuation.finish()   // gracefully stops the consumer Task
         #if DEBUG
-        print("[InstantLog] ⚠️ HTTP 429 — rate limited by server. Logging suspended for this session.")
+        print("[SensorCore] ⚠️ HTTP 429 — rate limited by server. Logging suspended for this session.")
         #endif
     }
 
@@ -260,8 +299,8 @@ actor InstantLogClient {
     ///
     /// - Parameter entry: The entry to serialise as the request body.
     /// - Returns: A ready-to-send `URLRequest`.
-    /// - Throws: ``InstantLogError/encodingFailed(_:)`` if JSON encoding fails.
-    private func buildRequest(entry: InstantLogEntry) throws -> URLRequest {
+    /// - Throws: ``SensorCoreError/encodingFailed(_:)`` if JSON encoding fails.
+    private func buildRequest(entry: SensorCoreEntry) throws -> URLRequest {
         let url = host.appendingPathComponent("api/logs")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -270,8 +309,8 @@ actor InstantLogClient {
         do {
             request.httpBody = try encoder.encode(entry)
         } catch {
-            // Preserve the real encoding error so callers can surface it via InstantLogError.encodingFailed.
-            throw InstantLogError.encodingFailed(error)
+            // Preserve the real encoding error so callers can surface it via SensorCoreError.encodingFailed.
+            throw SensorCoreError.encodingFailed(error)
         }
         return request
     }

@@ -1,13 +1,13 @@
 import Foundation
 
-// MARK: - InstantLogEntry
+// MARK: - SensorCoreEntry
 
 /// Internal JSON-encodable representation of a single log entry.
 ///
-/// Instances are created by ``InstantLog`` and passed to ``InstantLogClient``
+/// Instances are created by ``SensorCore`` and passed to ``SensorCoreClient``
 /// for queuing and transmission. This type is intentionally internal — consumers
-/// of the SDK interact only through ``InstantLog/log(_:level:userId:metadata:)``.
-struct InstantLogEntry: Encodable {
+/// of the SDK interact only through ``SensorCore/log(_:level:userId:metadata:)``.
+struct SensorCoreEntry: Encodable {
 
     // MARK: - Stored properties (match server field names exactly)
 
@@ -15,31 +15,31 @@ struct InstantLogEntry: Encodable {
     /// this struct is created.
     let content: String
 
-    /// Raw string value of ``InstantLogLevel``, e.g. `"info"`, `"error"`.
+    /// Raw string value of ``SensorCoreLevel``, e.g. `"info"`, `"error"`.
     let level: String
 
     /// External user identifier, if provided. Snake-cased to match the server field name.
     let user_id: String?
 
-    /// Key-value metadata encoded as ``InstantLogMetadataValue`` wrappers.
+    /// Key-value metadata encoded as ``SensorCoreMetadataValue`` wrappers.
     /// `nil` when the caller did not supply a metadata dict.
-    let metadata: [String: InstantLogMetadataValue]?
+    let metadata: [String: SensorCoreMetadataValue]?
 
     // MARK: - Init
 
     /// Creates a log entry from the SDK's public-facing parameters.
     ///
     /// During initialisation, unsupported metadata value types are silently dropped
-    /// (see ``InstantLogMetadataValue``).
+    /// (see ``SensorCoreMetadataValue``).
     ///
     /// - Parameters:
     ///   - content: Already-truncated log message.
     ///   - level: Severity level; stored as `rawValue` string.
     ///   - userId: Optional user identifier.
-    ///   - metadata: Raw dictionary; values are converted to ``InstantLogMetadataValue``.
+    ///   - metadata: Raw dictionary; values are converted to ``SensorCoreMetadataValue``.
     init(
         content: String,
-        level: InstantLogLevel,
+        level: SensorCoreLevel,
         userId: String?,
         metadata: [String: Any]?
     ) {
@@ -47,12 +47,12 @@ struct InstantLogEntry: Encodable {
         self.level = level.rawValue
         self.user_id = userId
         self.metadata = metadata.map { dict in
-            dict.compactMapValues { InstantLogMetadataValue(value: $0) }
+            dict.compactMapValues { SensorCoreMetadataValue(value: $0) }
         }
     }
 }
 
-// MARK: - InstantLogMetadataValue
+// MARK: - SensorCoreMetadataValue
 
 /// Type-erasing wrapper that makes heterogeneous metadata dictionaries `Encodable`.
 ///
@@ -70,7 +70,7 @@ struct InstantLogEntry: Encodable {
 ///
 /// Any other type (arrays, nested dictionaries, custom objects) is silently ignored
 /// by ``init?(value:)`` returning `nil`, which causes `compactMapValues` to drop the key.
-enum InstantLogMetadataValue: Encodable {
+enum SensorCoreMetadataValue: Encodable {
 
     case string(String)
     case int(Int)

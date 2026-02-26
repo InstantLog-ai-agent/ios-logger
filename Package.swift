@@ -2,27 +2,27 @@
 import PackageDescription
 
 let package = Package(
-    name: "InstantLogiOS",
+    name: "SensorCoreiOS",
     platforms: [
         .iOS(.v16),
         .macOS(.v13)
     ],
     products: [
         .library(
-            name: "InstantLogiOS",
-            targets: ["InstantLogiOS"]
+            name: "SensorCoreiOS",
+            targets: ["SensorCoreiOS"]
         ),
     ],
     targets: [
         .target(
-            name: "InstantLogiOS",
+            name: "SensorCoreiOS",
             dependencies: [],
-            path: "Sources/InstantLogiOS"
+            path: "Sources/SensorCoreiOS"
         ),
         .testTarget(
-            name: "InstantLogiOSTests",
-            dependencies: ["InstantLogiOS"],
-            path: "Tests/InstantLogiOSTests"
+            name: "SensorCoreiOSTests",
+            dependencies: ["SensorCoreiOS"],
+            path: "Tests/SensorCoreiOSTests"
         ),
     ]
 )

@@ -1,11 +1,11 @@
 import Foundation
 
-/// Main entry point for the InstantLog SDK.
+/// Main entry point for the SensorCore SDK.
 ///
 /// ## Setup
 /// Call `configure` once at app launch, e.g. in `AppDelegate` or the `@main` struct:
 /// ```swift
-/// InstantLog.configure(
+/// SensorCore.configure(
 ///     apiKey: "il_your_api_key",
 ///     host: URL(string: "https://logs.example.com")!
 /// )
@@ -14,31 +14,39 @@ import Foundation
 /// ## Logging
 /// ```swift
 /// // Fire-and-forget (most common)
-/// InstantLog.log("User signed up")
-/// InstantLog.log("Payment failed", level: .error, metadata: ["code": "card_declined"])
+/// SensorCore.log("User signed up")
+/// SensorCore.log("Payment failed", level: .error, metadata: ["code": "card_declined"])
 ///
 /// // Async — when you need to know the result
-/// try await InstantLog.logAsync("Critical event", level: .error)
+/// try await SensorCore.logAsync("Critical event", level: .error)
 /// ```
-public final class InstantLog: @unchecked Sendable {
+///
+/// ## Remote Config
+/// ```swift
+/// let config = await SensorCore.remoteConfig()
+/// if config.bool(for: "show_new_feature") == true {
+///     // feature enabled via SensorCore dashboard or AI agent
+/// }
+/// ```
+public final class SensorCore: @unchecked Sendable {
 
     // MARK: - Singleton
 
     /// The shared SDK instance.
     ///
-    /// In most cases interact through the static API (`InstantLog.log(...)`, `InstantLog.configure(...)`).
+    /// In most cases interact through the static API (`SensorCore.log(...)`, `SensorCore.configure(...)`).
     /// Direct access to `shared` is useful when you need the current config at runtime.
-    public static let shared = InstantLog()
+    public static let shared = SensorCore()
     private init() {}
 
     // MARK: - State
 
     /// The active networking actor. `nil` until ``configure(_:)`` is called,
-    /// or when the SDK is explicitly disabled via ``InstantLogConfig/enabled``.
-    private var client: InstantLogClient?
+    /// or when the SDK is explicitly disabled via ``SensorCoreConfig/enabled``.
+    private var client: SensorCoreClient?
 
     /// The current configuration snapshot. Set atomically under `lock`.
-    private var config: InstantLogConfig?
+    private var config: SensorCoreConfig?
 
     /// Protects concurrent writes to `client` and `config`.
     /// `NSLock` is sufficient because `configure()` is called rarely and is always synchronous.
@@ -50,7 +58,7 @@ public final class InstantLog: @unchecked Sendable {
     ///
     /// - Parameters:
     ///   - apiKey: Your project API key.
-    ///   - host: Base URL of your InstantLog server.
+    ///   - host: Base URL of your SensorCore server.
     ///   - defaultUserId: Optional user ID attached to every log (can be overridden per call).
     ///   - enabled: Set to `false` to silently disable all logging (e.g. in Previews).
     ///   - timeout: Network request timeout (default 10 s).
@@ -61,7 +69,7 @@ public final class InstantLog: @unchecked Sendable {
         enabled: Bool = true,
         timeout: TimeInterval = 10
     ) {
-        let cfg = InstantLogConfig(
+        let cfg = SensorCoreConfig(
             apiKey: apiKey,
             host: host,
             defaultUserId: defaultUserId,
@@ -71,8 +79,8 @@ public final class InstantLog: @unchecked Sendable {
         shared.configure(cfg)
     }
 
-    /// Configure the SDK with a pre-built ``InstantLogConfig``.
-    public static func configure(_ config: InstantLogConfig) {
+    /// Configure the SDK with a pre-built ``SensorCoreConfig``.
+    public static func configure(_ config: SensorCoreConfig) {
         shared.configure(config)
     }
 
@@ -87,14 +95,14 @@ public final class InstantLog: @unchecked Sendable {
     ///   - metadata: Arbitrary key-value pairs (`String`, `Int`, `Double`, `Float`, `Bool`).
     public static func log(
         _ content: String,
-        level: InstantLogLevel = .info,
+        level: SensorCoreLevel = .info,
         userId: String? = nil,
         metadata: [String: Any]? = nil
     ) {
         shared.fireAndForget(content, level: level, userId: userId, metadata: metadata)
     }
 
-    /// Send a log entry and **await** the result. Throws ``InstantLogError`` on failure.
+    /// Send a log entry and **await** the result. Throws ``SensorCoreError`` on failure.
     ///
     /// Use this when you need confirmation the log was delivered, e.g. before crashing.
     ///
@@ -103,14 +111,36 @@ public final class InstantLog: @unchecked Sendable {
     ///   - level: Severity level (default `.info`).
     ///   - userId: Overrides the `defaultUserId` set in config.
     ///   - metadata: Arbitrary key-value pairs (`String`, `Int`, `Double`, `Float`, `Bool`).
-    /// - Throws: ``InstantLogError``
+    /// - Throws: ``SensorCoreError``
     public static func logAsync(
         _ content: String,
-        level: InstantLogLevel = .info,
+        level: SensorCoreLevel = .info,
         userId: String? = nil,
         metadata: [String: Any]? = nil
     ) async throws {
         try await shared.sendAsync(content, level: level, userId: userId, metadata: metadata)
+    }
+
+    /// Fetch the current Remote Config flags from the SensorCore server.
+    ///
+    /// Always safe to call — returns an empty ``SensorCoreRemoteConfig`` if:
+    /// - The SDK has not been configured yet
+    /// - The server is unreachable
+    /// - The server returns a non-2xx response
+    /// - The response body is not valid JSON
+    ///
+    /// ```swift
+    /// let config = await SensorCore.remoteConfig()
+    ///
+    /// if config.bool(for: "show_new_onboarding") == true {
+    ///     showNewOnboarding()
+    /// }
+    /// let threshold = config.double(for: "warning_threshold") ?? 0.8
+    /// ```
+    ///
+    /// - Returns: An ``SensorCoreRemoteConfig`` with all current flags, or an empty config on failure.
+    public static func remoteConfig() async -> SensorCoreRemoteConfig {
+        await shared.fetchConfig()
     }
 
     // MARK: - Private helpers
@@ -120,23 +150,30 @@ public final class InstantLog: @unchecked Sendable {
     /// The lock guarantees that a concurrent `log()` on another thread always sees
     /// a consistent (`config`, `client`) pair — never one without the other.
     /// A startup banner is printed to the Xcode console in `DEBUG` builds.
-    private func configure(_ cfg: InstantLogConfig) {
+    private func configure(_ cfg: SensorCoreConfig) {
         lock.withLock {
             self.config = cfg
-            self.client = cfg.enabled ? InstantLogClient(config: cfg) : nil
+            self.client = cfg.enabled ? SensorCoreClient(config: cfg) : nil
         }
         #if DEBUG
         if cfg.enabled {
             print("""
-            [InstantLog] ✅ configured
+            [SensorCore] ✅ configured
               Host:    \(cfg.host.absoluteString)
               User:    \(cfg.defaultUserId ?? "(none)")
               Timeout: \(Int(cfg.timeout))s
             """)
         } else {
-            print("[InstantLog] ⚠️  SDK is disabled (enabled: false). No logs will be sent.")
+            print("[SensorCore] ⚠️  SDK is disabled (enabled: false). No logs will be sent.")
         }
         #endif
+    }
+
+    /// Fetches Remote Config via the actor. Returns empty config if not configured.
+    private func fetchConfig() async -> SensorCoreRemoteConfig {
+        let client = lock.withLock { self.client }
+        guard let client else { return .empty }
+        return await client.fetchRemoteConfig()
     }
 
     /// Validates state and builds a log entry ready for dispatch.
@@ -148,39 +185,39 @@ public final class InstantLog: @unchecked Sendable {
     /// - Returns: A `(entry, client)` tuple, or `nil` when logging should be skipped.
     private func prepareEntry(
         _ content: String,
-        level: InstantLogLevel,
+        level: SensorCoreLevel,
         userId: String?,
         metadata: [String: Any]?
-    ) -> (entry: InstantLogEntry, client: InstantLogClient)? {
+    ) -> (entry: SensorCoreEntry, client: SensorCoreClient)? {
         // Read client and config atomically. Without the lock, a concurrent configure()
         // call on another thread could leave us with a mismatched pair (old client, new config).
         let (client, config) = lock.withLock { (self.client, self.config) }
         guard let client, let config else { return nil }
         let resolvedUserId = userId ?? config.defaultUserId
         let truncated = content.count > 200 ? String(content.prefix(197)) + "..." : content
-        let entry = InstantLogEntry(content: truncated, level: level, userId: resolvedUserId, metadata: metadata)
+        let entry = SensorCoreEntry(content: truncated, level: level, userId: resolvedUserId, metadata: metadata)
         return (entry, client)
     }
 
     /// Enqueues a log entry via the internal AsyncStream queue. **Synchronous, never throws.**
     ///
-    /// Calls ``InstantLogClient/enqueue(_:)`` which is `nonisolated` — returns immediately
+    /// Calls ``SensorCoreClient/enqueue(_:)`` which is `nonisolated` — returns immediately
     /// without creating a `Task` or suspending the caller. Network I/O happens on
     /// the queue's single consumer Task.
     private func fireAndForget(
         _ content: String,
-        level: InstantLogLevel,
+        level: SensorCoreLevel,
         userId: String?,
         metadata: [String: Any]?
     ) {
         guard let (entry, client) = prepareEntry(content, level: level, userId: userId, metadata: metadata) else {
             #if DEBUG
-            debugPrint("[InstantLog] Not configured. Call InstantLog.configure(...) at app startup.")
+            debugPrint("[SensorCore] Not configured. Call SensorCore.configure(...) at app startup.")
             #endif
             return
         }
         // enqueue() is nonisolated and synchronous — no Task created per call.
-        // The single consumer Task inside InstantLogClient drains the queue in the background.
+        // The single consumer Task inside SensorCoreClient drains the queue in the background.
         client.enqueue(entry)
     }
 
@@ -189,15 +226,15 @@ public final class InstantLog: @unchecked Sendable {
     /// Wrapped in `Task.detached` to guarantee execution off `@MainActor`
     /// even when `logAsync()` is called from a SwiftUI view or another `@MainActor` context.
     ///
-    /// - Throws: ``InstantLogError`` on any failure.
+    /// - Throws: ``SensorCoreError`` on any failure.
     private func sendAsync(
         _ content: String,
-        level: InstantLogLevel,
+        level: SensorCoreLevel,
         userId: String?,
         metadata: [String: Any]?
     ) async throws {
         guard let (entry, client) = prepareEntry(content, level: level, userId: userId, metadata: metadata) else {
-            throw InstantLogError.notConfigured
+            throw SensorCoreError.notConfigured
         }
         // Detach from the caller's actor context so the network work never runs on @MainActor,
         // even if logAsync() is called from a SwiftUI view or other @MainActor context.

@@ -1,7 +1,7 @@
 import XCTest
 
-import InstantLogiOSTests
+import SensorCoreiOSTests
 
 var tests = [XCTestCaseEntry]()
-tests += InstantLogiOSTests.allTests()
+tests += SensorCoreiOSTests.allTests()
 XCTMain(tests)
