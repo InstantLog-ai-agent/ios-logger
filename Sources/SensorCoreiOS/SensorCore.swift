@@ -89,7 +89,7 @@ public final class SensorCore: @unchecked Sendable {
     /// Send a log entry. **Fire-and-forget** — returns immediately, never throws.
     ///
     /// - Parameters:
-    ///   - content: Log message (max 200 characters).
+    ///   - content: Log message (max 5000 characters).
     ///   - level: Severity level (default `.info`).
     ///   - userId: Overrides the `defaultUserId` set in config.
     ///   - metadata: Arbitrary key-value pairs (`String`, `Int`, `Double`, `Float`, `Bool`).
@@ -107,7 +107,7 @@ public final class SensorCore: @unchecked Sendable {
     /// Use this when you need confirmation the log was delivered, e.g. before crashing.
     ///
     /// - Parameters:
-    ///   - content: Log message (max 200 characters).
+    ///   - content: Log message (max 5000 characters).
     ///   - level: Severity level (default `.info`).
     ///   - userId: Overrides the `defaultUserId` set in config.
     ///   - metadata: Arbitrary key-value pairs (`String`, `Int`, `Double`, `Float`, `Bool`).
@@ -179,8 +179,8 @@ public final class SensorCore: @unchecked Sendable {
     /// Validates state and builds a log entry ready for dispatch.
     ///
     /// Returns `nil` if the SDK is unconfigured or disabled so call sites can stay
-    /// synchronous and non-throwing. Messages longer than 200 chars are silently
-    /// truncated to 197 chars + `"..."` to satisfy the server character limit.
+    /// synchronous and non-throwing. Messages longer than 5000 chars are silently
+    /// truncated to 4997 chars + `"..."` to satisfy the server character limit.
     ///
     /// - Returns: A `(entry, client)` tuple, or `nil` when logging should be skipped.
     private func prepareEntry(
@@ -194,7 +194,7 @@ public final class SensorCore: @unchecked Sendable {
         let (client, config) = lock.withLock { (self.client, self.config) }
         guard let client, let config else { return nil }
         let resolvedUserId = userId ?? config.defaultUserId
-        let truncated = content.count > 200 ? String(content.prefix(197)) + "..." : content
+        let truncated = content.count > 5000 ? String(content.prefix(4997)) + "..." : content
         let entry = SensorCoreEntry(content: truncated, level: level, userId: resolvedUserId, metadata: metadata)
         return (entry, client)
     }

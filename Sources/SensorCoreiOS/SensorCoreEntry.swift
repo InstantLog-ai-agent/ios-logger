@@ -11,7 +11,7 @@ struct SensorCoreEntry: Encodable {
 
     // MARK: - Stored properties (match server field names exactly)
 
-    /// The log message text. Already truncated to 200 characters by the time
+    /// The log message text. Already truncated to 5000 characters by the time
     /// this struct is created.
     let content: String
 
