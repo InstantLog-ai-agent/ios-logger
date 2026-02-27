@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(Network)
+import Network
+#endif
 
 // MARK: - SensorCoreError
 
@@ -65,7 +68,7 @@ public enum SensorCoreError: Error, LocalizedError {
 
 // MARK: - SensorCoreClient
 
-/// Internal actor that owns the log queue and all network I/O.
+/// Internal actor that owns the log queue, persistence, network monitoring, and all network I/O.
 ///
 /// ## Architecture
 ///
@@ -83,8 +86,21 @@ public enum SensorCoreError: Error, LocalizedError {
 ///    │
 ///    ▼
 /// transmit() → URLSession → server
+///    │                         │
+///    │                    429? → silence() → stream.finish() → Task exits
+///    │
+///    └── network error? → persistence.save([entry])
 ///                              │
-///                         429? → silence() → stream.finish() → Task exits
+///                         NWPathMonitor
+///                              │
+///                    path == .satisfied?
+///                              │
+///                              ▼
+///                        flushPending()
+///                              │
+///                    retry → transmit()
+///                         success → remove from file
+///                         failure → retryCount += 1, keep
 /// ```
 ///
 /// ## Thread safety
@@ -118,6 +134,10 @@ actor SensorCoreClient {
     /// Calling `.finish()` on it signals the consumer Task to exit gracefully.
     private let continuation: AsyncStream<SensorCoreEntry>.Continuation
 
+    /// Disk persistence manager for offline log buffering.
+    /// `nil` when `persistFailedLogs` is disabled in config.
+    private let persistence: SensorCorePersistence?
+
     /// Circuit-breaker flag.
     ///
     /// Once set to `true` (on HTTP 429), it is never reset during the current session.
@@ -126,6 +146,16 @@ actor SensorCoreClient {
     /// sequential consumer Task, and a stale `false` read by `enqueue` at worst
     /// causes one extra `yield` that the already-finished stream will silently drop.
     nonisolated(unsafe) private var _isSilenced: Bool = false
+
+    /// Whether a flush is currently in progress (prevents concurrent flushes).
+    private var _isFlushing: Bool = false
+
+    #if canImport(Network)
+    /// Network path monitor that triggers pending log flush when connectivity returns.
+    private let pathMonitor: NWPathMonitor
+    /// Dedicated queue for NWPathMonitor callbacks.
+    private let monitorQueue = DispatchQueue(label: "com.sensorcore.network-monitor", qos: .utility)
+    #endif
 
     // MARK: - Init
 
@@ -143,6 +173,16 @@ actor SensorCoreClient {
         self.apiKey = config.apiKey
         self.host = config.host
 
+        // Set up persistence if enabled
+        if config.persistFailedLogs {
+            self.persistence = SensorCorePersistence(
+                maxEntries: config.maxPendingLogs,
+                maxAge: config.pendingLogMaxAge
+            )
+        } else {
+            self.persistence = nil
+        }
+
         // Build the bounded FIFO stream. The continuation's `yield` is Sendable,
         // so it can be called from any thread / actor.
         var cont: AsyncStream<SensorCoreEntry>.Continuation!
@@ -151,16 +191,30 @@ actor SensorCoreClient {
         ) { cont = $0 }
         self.continuation = cont
 
+        #if canImport(Network)
+        self.pathMonitor = NWPathMonitor()
+        #endif
+
         // Start the single consumer. `[weak self]` prevents a permanent reference
         // cycle — if this actor is released (e.g. after re-configure) the Task
         // will exit on the next loop iteration.
         Task.detached(priority: .utility) { [weak self] in
+            // Flush any entries that were persisted in a previous app session.
+            if let self {
+                await self.flushPending()
+            }
+
             for await entry in stream {
                 guard let self else { break }
                 let banned = await self.transmit(entry: entry)
                 if banned { break }
             }
         }
+
+        // Start network monitoring for connectivity changes.
+        #if canImport(Network)
+        startNetworkMonitor()
+        #endif
     }
 
     // MARK: - Internal API
@@ -195,6 +249,8 @@ actor SensorCoreClient {
         do {
             (_, response) = try await session.data(for: request)
         } catch {
+            // Persist the entry for later retry if offline buffering is enabled.
+            persistence?.save([entry])
             throw SensorCoreError.networkError(error)
         }
         if let http = response as? HTTPURLResponse {
@@ -208,7 +264,7 @@ actor SensorCoreClient {
         }
     }
 
-    // MARK: - Private
+    // MARK: - Remote Config
 
     /// Fetches the current Remote Config from the server.
     ///
@@ -249,6 +305,87 @@ actor SensorCoreClient {
         }
     }
 
+    // MARK: - Pending Flush
+
+    /// Loads all pending entries from disk and attempts to resend them.
+    ///
+    /// Entries that succeed are removed; entries that fail again have their
+    /// `retryCount` incremented and are written back to disk.
+    ///
+    /// This is called:
+    /// 1. At client startup (to flush entries from a previous app session)
+    /// 2. When `NWPathMonitor` detects that connectivity has returned
+    func flushPending() async {
+        guard let persistence else { return }
+        guard !_isSilenced else { return }
+        guard !_isFlushing else { return }  // prevent concurrent flushes
+        _isFlushing = true
+        defer { _isFlushing = false }
+
+        let pending = persistence.loadPending()
+        guard !pending.isEmpty else { return }
+
+        #if DEBUG
+        print("[SensorCore] 🔄 Flushing \(pending.count) pending log(s) from disk...")
+        #endif
+
+        var stillFailed: [SensorCoreEntry] = []
+
+        for (index, var entry) in pending.enumerated() {
+            guard !_isSilenced else {
+                // Rate-limited mid-flush — preserve all un-attempted entries.
+                let remaining = pending[index...]
+                for remainingEntry in remaining {
+                    stillFailed.append(remainingEntry)
+                }
+                break
+            }
+
+            guard let request = try? buildRequest(entry: entry) else {
+                // Encoding error — skip permanently
+                continue
+            }
+
+            do {
+                let (_, response) = try await session.data(for: request)
+                if let http = response as? HTTPURLResponse {
+                    if http.statusCode == 429 {
+                        silence()
+                        // Preserve current + remaining un-attempted entries
+                        let remaining = pending[(index + 1)...]
+                        for remainingEntry in remaining {
+                            stillFailed.append(remainingEntry)
+                        }
+                        break
+                    }
+                    if !(200...299).contains(http.statusCode) {
+                        #if DEBUG
+                        print("[SensorCore] ❌ Flush: server error \(http.statusCode) — will retry later.")
+                        #endif
+                        entry.retryCount += 1
+                        stillFailed.append(entry)
+                    }
+                    // 2xx → success, entry is not re-saved
+                }
+            } catch {
+                // Still no network — save back for next attempt
+                entry.retryCount += 1
+                stillFailed.append(entry)
+            }
+        }
+
+        persistence.replacePending(stillFailed)
+
+        #if DEBUG
+        let sent = pending.count - stillFailed.count
+        if sent > 0 {
+            print("[SensorCore] ✅ Flushed \(sent) pending log(s). \(stillFailed.count) still pending.")
+        }
+        #endif
+    }
+
+    // MARK: - Private
+
     /// Sends one entry from the queue. Called by the consumer Task in a serial loop.
     ///
     /// - Parameter entry: The next entry dequeued from the `AsyncStream`.
@@ -278,6 +415,8 @@ actor SensorCoreClient {
             #if DEBUG
             print("[SensorCore] ❌ Network error: \(error.localizedDescription)")
             #endif
+            // Persist the failed entry for later retry.
+            persistence?.save([entry])
         }
         return false
     }
@@ -290,12 +429,20 @@ actor SensorCoreClient {
     private func silence() {
         _isSilenced = true
         continuation.finish()   // gracefully stops the consumer Task
+
+        #if canImport(Network)
+        pathMonitor.cancel()    // stop monitoring — no point retrying if rate-limited
+        #endif
+
         #if DEBUG
         print("[SensorCore] ⚠️ HTTP 429 — rate limited by server. Logging suspended for this session.")
         #endif
     }
 
     /// Builds a `POST /api/logs` request with the correct headers and JSON body.
+    ///
+    /// Uses ``SensorCoreEntry/encodeForServer(encoder:)`` to exclude internal
+    /// fields like `retryCount` from the request payload.
     ///
     /// - Parameter entry: The entry to serialise as the request body.
     /// - Returns: A ready-to-send `URLRequest`.
@@ -307,11 +454,29 @@ actor SensorCoreClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         do {
-            request.httpBody = try encoder.encode(entry)
+            request.httpBody = try entry.encodeForServer(encoder: encoder)
         } catch {
-            // Preserve the real encoding error so callers can surface it via SensorCoreError.encodingFailed.
             throw SensorCoreError.encodingFailed(error)
         }
         return request
     }
+
+    // MARK: - Network Monitoring
+
+    #if canImport(Network)
+    /// Starts monitoring network path changes.
+    ///
+    /// When connectivity transitions to `.satisfied` (e.g. leaving airplane mode,
+    /// exiting a tunnel), any pending log entries are automatically flushed.
+    private nonisolated func startNetworkMonitor() {
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            guard path.status == .satisfied else { return }
+            guard let self else { return }
+            Task {
+                await self.flushPending()
+            }
+        }
+        pathMonitor.start(queue: monitorQueue)
+    }
+    #endif
 }

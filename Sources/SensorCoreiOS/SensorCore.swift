@@ -62,19 +62,28 @@ public final class SensorCore: @unchecked Sendable {
     ///   - defaultUserId: Optional user ID attached to every log (can be overridden per call).
     ///   - enabled: Set to `false` to silently disable all logging (e.g. in Previews).
     ///   - timeout: Network request timeout (default 10 s).
+    ///   - persistFailedLogs: Save failed logs to disk for retry (default `true`).
+    ///   - maxPendingLogs: Max entries stored on disk (default `500`).
+    ///   - pendingLogMaxAge: Max age in seconds before stale entries are dropped (default `86400`).
     public static func configure(
         apiKey: String,
         host: URL,
         defaultUserId: String? = nil,
         enabled: Bool = true,
-        timeout: TimeInterval = 10
+        timeout: TimeInterval = 10,
+        persistFailedLogs: Bool = true,
+        maxPendingLogs: Int = 500,
+        pendingLogMaxAge: TimeInterval = 86400
     ) {
         let cfg = SensorCoreConfig(
             apiKey: apiKey,
             host: host,
             defaultUserId: defaultUserId,
             enabled: enabled,
-            timeout: timeout
+            timeout: timeout,
+            persistFailedLogs: persistFailedLogs,
+            maxPendingLogs: maxPendingLogs,
+            pendingLogMaxAge: pendingLogMaxAge
         )
         shared.configure(cfg)
     }
