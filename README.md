@@ -7,7 +7,7 @@ Swift Package for sending logs to your [SensorCore](https://github.com/udevwork/
 **Swift Package Manager** — add to your `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/sensorcore/ios", from: "1.0.3")
+.package(url: "https://github.com/sensorcore/ios", from: "1.1.0")
 ```
 
 Or in Xcode: **File → Add Package Dependencies…** → paste the repo URL.
@@ -45,6 +45,9 @@ do {
 | `defaultUserId` | `String?` | `nil` | Auto-attached user ID for every log |
 | `enabled` | `Bool` | `true` | Set `false` to silence all logs (e.g. SwiftUI Previews) |
 | `timeout` | `TimeInterval` | `10` | Network request timeout in seconds |
+| `persistFailedLogs` | `Bool` | `true` | Save failed logs to disk for auto-retry |
+| `maxPendingLogs` | `Int` | `500` | Max entries buffered on disk |
+| `pendingLogMaxAge` | `TimeInterval` | `86400` | Drop buffered entries older than this (24h) |
 
 ### Full config example
 
@@ -54,7 +57,10 @@ SensorCore.configure(
     host: URL(string: "https://logs.example.com")!,
     defaultUserId: Auth.currentUser?.id,   // attach user to every log
     enabled: !ProcessInfo.processInfo.environment.keys.contains("XCODE_RUNNING_FOR_PREVIEWS"),
-    timeout: 15
+    timeout: 15,
+    persistFailedLogs: true,               // save failed logs to disk (default)
+    maxPendingLogs: 500,                   // max buffered entries on disk
+    pendingLogMaxAge: 86400                // drop entries older than 24h
 )
 ```
 
@@ -102,6 +108,26 @@ do {
 ### Rate Limiting
 
 If the server returns **HTTP 429**, the SDK permanently suspends all logging for the current app session (circuit-breaker pattern). No further network requests are made until the app is relaunched. This prevents a log loop from hammering the server.
+
+## Offline Buffering
+
+When a log fails to send (e.g. no internet in a tunnel), the SDK automatically:
+
+1. **Saves** the entry to disk (`Library/Caches/SensorCore/pending.jsonl`)
+2. **Monitors** connectivity via `NWPathMonitor`
+3. **Retries** all pending entries when the network returns
+4. **Flushes** entries from previous app sessions on next launch
+
+Each entry keeps its **original timestamp** from when `log()` was called, so analytics order is preserved even if delivery is delayed by minutes or hours.
+
+**Safeguards:**
+
+- Max **500 entries** on disk (~500 KB) — oldest dropped when full
+- Max **3 retry attempts** per entry — then permanently dropped
+- **24-hour TTL** — stale entries are pruned automatically
+- **No permissions required** — uses the app's private sandbox
+- Configurable via `persistFailedLogs`, `maxPendingLogs`, `pendingLogMaxAge`
+- Set `persistFailedLogs: false` to disable entirely
 
 ## Remote Config
 
