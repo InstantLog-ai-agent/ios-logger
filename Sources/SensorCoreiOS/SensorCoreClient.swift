@@ -27,7 +27,7 @@ import Network
 public enum SensorCoreError: Error, LocalizedError {
 
     /// ``SensorCore/logAsync(_:level:userId:metadata:)`` was called before
-    /// ``SensorCore/configure(apiKey:host:defaultUserId:enabled:timeout:)``.
+    /// ``SensorCore/configure(apiKey:defaultUserId:enabled:timeout:)``.
     case notConfigured
 
     /// The ``SensorCoreEntry`` could not be serialised to JSON.

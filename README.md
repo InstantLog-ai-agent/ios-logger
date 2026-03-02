@@ -1,6 +1,12 @@
 # SensorCore iOS SDK
 
-Swift Package for sending logs to your [SensorCore](https://github.com/udevwork/SensorCore) server. Zero external dependencies, Swift Concurrency, fire-and-forget API.
+Official Swift SDK for [SensorCore](https://sensorcore.dev) — a real-time analytics and logging platform for mobile and web apps. Collect logs, analyze user behavior with ML, run A/B tests, and manage Remote Config from one dashboard.
+
+👉 **[sensorcore.dev](https://sensorcore.dev)** — create a free account to get your API key.
+
+---
+
+Swift Package with zero external dependencies, Swift Concurrency, and fire-and-forget API.
 
 ## Installation
 
@@ -18,10 +24,7 @@ Or in Xcode: **File → Add Package Dependencies…** → paste the repo URL.
 import SensorCoreiOS
 
 // 1. Configure once at app launch (AppDelegate / @main struct)
-SensorCore.configure(
-    apiKey: "sc_your_api_key",
-    host: URL(string: "https://logs.your-server.com")!
-)
+SensorCore.configure(apiKey: "sc_your_api_key")
 
 // 2a. Fire-and-forget — no await needed, never throws (most common)
 SensorCore.log("App launched")
@@ -41,7 +44,7 @@ do {
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `apiKey` | `String` | — | Your project API key |
-| `host` | `URL` | — | Your SensorCore server URL |
+| `host` | `URL` | `api.sensorcore.dev` | SensorCore server URL (rarely needed) |
 | `defaultUserId` | `String?` | `nil` | Auto-attached user ID for every log |
 | `enabled` | `Bool` | `true` | Set `false` to silence all logs (e.g. SwiftUI Previews) |
 | `timeout` | `TimeInterval` | `10` | Network request timeout in seconds |
@@ -54,7 +57,6 @@ do {
 ```swift
 SensorCore.configure(
     apiKey: "sc_abc123",
-    host: URL(string: "https://logs.example.com")!,
     defaultUserId: Auth.currentUser?.id,   // attach user to every log
     enabled: !ProcessInfo.processInfo.environment.keys.contains("XCODE_RUNNING_FOR_PREVIEWS"),
     timeout: 15,

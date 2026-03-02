@@ -5,10 +5,7 @@ import Foundation
 /// ## Setup
 /// Call `configure` once at app launch, e.g. in `AppDelegate` or the `@main` struct:
 /// ```swift
-/// SensorCore.configure(
-///     apiKey: "il_your_api_key",
-///     host: URL(string: "https://logs.example.com")!
-/// )
+/// SensorCore.configure(apiKey: "sc_your_api_key")
 /// ```
 ///
 /// ## Logging
@@ -56,15 +53,46 @@ public final class SensorCore: @unchecked Sendable {
 
     /// Configure the SDK. Must be called before any `log` calls.
     ///
+    /// The host defaults to `https://api.sensorcore.dev`, so in most cases
+    /// you only need to pass the API key:
+    /// ```swift
+    /// SensorCore.configure(apiKey: "sc_your_api_key")
+    /// ```
+    ///
     /// - Parameters:
     ///   - apiKey: Your project API key.
-    ///   - host: Base URL of your SensorCore server.
     ///   - defaultUserId: Optional user ID attached to every log (can be overridden per call).
     ///   - enabled: Set to `false` to silently disable all logging (e.g. in Previews).
     ///   - timeout: Network request timeout (default 10 s).
     ///   - persistFailedLogs: Save failed logs to disk for retry (default `true`).
     ///   - maxPendingLogs: Max entries stored on disk (default `500`).
     ///   - pendingLogMaxAge: Max age in seconds before stale entries are dropped (default `86400`).
+    public static func configure(
+        apiKey: String,
+        defaultUserId: String? = nil,
+        enabled: Bool = true,
+        timeout: TimeInterval = 10,
+        persistFailedLogs: Bool = true,
+        maxPendingLogs: Int = 500,
+        pendingLogMaxAge: TimeInterval = 86400
+    ) {
+        let cfg = SensorCoreConfig(
+            apiKey: apiKey,
+            defaultUserId: defaultUserId,
+            enabled: enabled,
+            timeout: timeout,
+            persistFailedLogs: persistFailedLogs,
+            maxPendingLogs: maxPendingLogs,
+            pendingLogMaxAge: pendingLogMaxAge
+        )
+        shared.configure(cfg)
+    }
+
+    /// Configure the SDK with an explicit host URL.
+    ///
+    /// - Important: In most cases you don't need to specify the host —
+    ///   use ``configure(apiKey:defaultUserId:enabled:timeout:persistFailedLogs:maxPendingLogs:pendingLogMaxAge:)`` instead.
+    @available(*, deprecated, message: "Host defaults to api.sensorcore.dev. Use configure(apiKey:) instead.")
     public static func configure(
         apiKey: String,
         host: URL,

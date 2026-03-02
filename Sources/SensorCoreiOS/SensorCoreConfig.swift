@@ -1,15 +1,14 @@
 import Foundation
 
+/// The default SensorCore API host.
+public let sensorCoreDefaultHost = URL(string: "https://api.sensorcore.dev")!
+
 /// Configuration bag passed to ``SensorCore/configure(_:)`` at app startup.
 ///
-/// All properties except `apiKey` and `host` have sensible defaults,
-/// so the minimal setup is just two lines:
+/// Only `apiKey` is required — the host defaults to `https://api.sensorcore.dev`.
+/// Minimal setup:
 /// ```swift
-/// let config = SensorCoreConfig(
-///     apiKey: "il_your_key",
-///     host:   URL(string: "https://logs.example.com")!
-/// )
-/// SensorCore.configure(config)
+/// SensorCore.configure(apiKey: "sc_your_key")
 /// ```
 public struct SensorCoreConfig: Sendable {
 
@@ -23,7 +22,7 @@ public struct SensorCoreConfig: Sendable {
 
     /// Base URL of the SensorCore server that will receive the logs.
     ///
-    /// Must include the scheme, e.g. `https://logs.example.com`.
+    /// Defaults to `https://api.sensorcore.dev`.
     /// Do **not** include a trailing slash or path — the SDK appends `/api/logs` automatically.
     public var host: URL
 
@@ -95,7 +94,7 @@ public struct SensorCoreConfig: Sendable {
     ///
     /// - Parameters:
     ///   - apiKey: Your project API key from the SensorCore dashboard.
-    ///   - host: Base URL of your SensorCore server (no trailing slash).
+    ///   - host: Base URL of the SensorCore server. Default: `https://api.sensorcore.dev`.
     ///   - defaultUserId: Optional user identifier attached to every log. Default: `nil`.
     ///   - enabled: Set to `false` to disable all logging. Default: `true`.
     ///   - timeout: Network request timeout in seconds. Default: `10`.
@@ -104,7 +103,7 @@ public struct SensorCoreConfig: Sendable {
     ///   - pendingLogMaxAge: Max age in seconds before stale entries are dropped. Default: `86400` (24h).
     public init(
         apiKey: String,
-        host: URL,
+        host: URL = sensorCoreDefaultHost,
         defaultUserId: String? = nil,
         enabled: Bool = true,
         timeout: TimeInterval = 10,
